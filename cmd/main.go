@@ -9,7 +9,7 @@ func main() {
 	serv := server.New(
 		&config.Config{
 			Host: "localhost",
-			Port: "8090",
+			Port: "8080",
 		})
 	serv.Run()
 }
