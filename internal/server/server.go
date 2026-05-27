@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
+	"sync"
+	"tcp-serv/internal/client"
 	"tcp-serv/internal/config"
+	"tcp-serv/internal/protocol"
 	"tcp-serv/internal/ratelimiter"
 )
 
@@ -13,14 +17,12 @@ type Server struct {
 	host          string
 	port          string
 	ipRateLimiter *ratelimiter.IPRateLimiter
+	mutex         sync.Mutex
+	commands      map[string]Command
 }
 
-//type Protocol interface {
-//	handleRequest(conn net.Conn)
-//}
-
-type Client struct {
-	conn net.Conn
+type Command interface {
+	Handle(client *client.Client, args string) error
 }
 
 func New(config *config.Config) *Server {
@@ -28,6 +30,10 @@ func New(config *config.Config) *Server {
 		host:          config.Host,
 		port:          config.Port,
 		ipRateLimiter: ratelimiter.NewIPRateLimiter(),
+		commands: map[string]Command{
+			"EHLO": &protocol.EhloCommand{},
+			"DATE": &protocol.DateCommand{},
+		},
 	}
 }
 
@@ -52,22 +58,39 @@ func (server *Server) Run() {
 			conn.Close()
 			continue
 		}
-		client := &Client{
-			conn: conn,
-		}
-		go server.handleRequest(client.conn)
+
+		newClient := client.NewClient(
+			conn,
+			false,
+		)
+		go server.handleRequest(newClient)
 	}
 }
 
-func (server *Server) handleRequest(conn net.Conn) {
-	defer conn.Close()
-	defer server.ipRateLimiter.Release(conn.RemoteAddr().String())
+func (server *Server) handleRequest(client *client.Client) {
+	defer client.Conn.Close()
+	defer server.ipRateLimiter.Release(client.Conn.RemoteAddr().String())
 
-	scanner := bufio.NewScanner(conn)
+	scanner := bufio.NewScanner(client.Conn)
 	for scanner.Scan() {
 		message := scanner.Text()
-		log.Printf("Message incoming: %s\n", message)
-		conn.Write([]byte("Message received.\n"))
+		if len(message) == 0 {
+			continue
+		}
+
+		parts := strings.Fields(message)
+		verb := strings.ToUpper(parts[0])
+		args := strings.Join(parts[1:], " ")
+
+		if cmd, ok := server.commands[verb]; ok {
+			err := cmd.Handle(client, args)
+			if err != nil {
+				log.Printf("Error handling command %s: %s", parts[0], err)
+				client.Conn.Write([]byte(err.Error() + "\r\n"))
+			}
+		} else {
+			client.Conn.Write([]byte("500 Unknown command\r\n"))
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
