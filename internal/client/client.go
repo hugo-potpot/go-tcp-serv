@@ -1,6 +1,8 @@
 package client
 
-import "net"
+import (
+	"net"
+)
 
 type Client struct {
 	Conn   net.Conn
@@ -8,5 +10,8 @@ type Client struct {
 }
 
 func NewClient(conn net.Conn, isLive bool) *Client {
-	return &Client{Conn: conn, IsLive: isLive}
+	return &Client{
+		Conn:   conn,
+		IsLive: isLive,
+	}
 }

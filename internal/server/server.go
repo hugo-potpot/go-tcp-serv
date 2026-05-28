@@ -11,7 +11,10 @@ import (
 	"tcp-serv/internal/config"
 	"tcp-serv/internal/protocol"
 	"tcp-serv/internal/ratelimiter"
+	"time"
 )
+
+const TIMEOUT = 10 * time.Second
 
 type Server struct {
 	host          string
@@ -33,6 +36,7 @@ func New(config *config.Config) *Server {
 		commands: map[string]Command{
 			"EHLO": &protocol.EhloCommand{},
 			"DATE": &protocol.DateCommand{},
+			"BYE":  &protocol.ByeCommand{},
 		},
 	}
 }
@@ -71,9 +75,15 @@ func (server *Server) handleRequest(client *client.Client) {
 	defer client.Conn.Close()
 	defer server.ipRateLimiter.Release(client.Conn.RemoteAddr().String())
 
-	scanner := bufio.NewScanner(client.Conn)
-	for scanner.Scan() {
-		message := scanner.Text()
+	for {
+		client.Conn.SetReadDeadline(time.Now().Add(TIMEOUT))
+		message, err := bufio.NewReader(client.Conn).ReadString('\n')
+		client.Conn.SetReadDeadline(time.Now().Add(TIMEOUT))
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
 		if len(message) == 0 {
 			continue
 		}
@@ -91,9 +101,5 @@ func (server *Server) handleRequest(client *client.Client) {
 		} else {
 			client.Conn.Write([]byte("500 Unknown command\r\n"))
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Println(err)
 	}
 }
